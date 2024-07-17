@@ -1,48 +1,47 @@
+# app.py
+from flask import Flask, render_template
+from flask_socketio import SocketIO, emit
 import face_recognition
-import cv2
 import numpy as np
-from flask import Flask, jsonify, request
+import cv2
+import base64
+import os
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app)
 
-# Cargar imágenes de estudiantes y codificar sus caras
+# Cargar las imágenes de los estudiantes
 known_face_encodings = []
 known_face_names = []
 
-# Aquí se debe cargar las fotos de los estudiantes y sus nombres correspondientes
-# Ejemplo:
-# student_image = face_recognition.load_image_file("path/to/student_image.jpg")
-# student_face_encoding = face_recognition.face_encodings(student_image)[0]
-# known_face_encodings.append(student_face_encoding)
-# known_face_names.append("Student Name")
+for filename in os.listdir('student_images'):
+    if filename.endswith('.jpg') or filename.endswith('.png'):
+        image = face_recognition.load_image_file(f'student_images/{filename}')
+        encoding = face_recognition.face_encodings(image)[0]
+        known_face_encodings.append(encoding)
+        known_face_names.append(filename.split('.')[0])
 
-@app.route('/recognize', methods=['POST'])
-def recognize():
-    # Obtener la imagen desde la solicitud
-    image = request.files['image'].read()
-    npimg = np.frombuffer(image, np.uint8)
-    frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+@socketio.on('frame')
+def handle_frame(data):
+    # Decodificar la imagen base64
+    img_data = base64.b64decode(data)
+    np_arr = np.frombuffer(img_data, np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-    # Convertir la imagen de BGR a RGB
-    rgb_frame = frame[:, :, ::-1]
+    # Procesar la imagen
+    unknown_face_encodings = face_recognition.face_encodings(frame)
 
-    # Encontrar todas las caras en la imagen
-    face_locations = face_recognition.face_locations(rgb_frame)
-    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+    if len(unknown_face_encodings) > 0:
+        unknown_face_encoding = unknown_face_encodings[0]
+        results = face_recognition.compare_faces(known_face_encodings, unknown_face_encoding)
+        if True in results:
+            first_match_index = results.index(True)
+            name = known_face_names[first_match_index]
+            emit('recognized', {'name': name})
+            return
 
-    face_names = []
-    for face_encoding in face_encodings:
-        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-        name = "Unknown"
-
-        face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-        best_match_index = np.argmin(face_distances)
-        if matches[best_match_index]:
-            name = known_face_names[best_match_index]
-
-        face_names.append(name)
-
-    return jsonify(face_names)
+    emit('recognized', {'name': 'Unknown'})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    socketio.run(app, debug=True)
