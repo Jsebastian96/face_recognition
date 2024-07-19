@@ -1,0 +1,7 @@
+Flask
+Flask-SocketIO
+pymongo
+face_recognition
+git+https://github.com/ageitgey/face_recognition_models
+opencv-python
+python-dotenv
